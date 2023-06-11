@@ -8,7 +8,9 @@ import os
 import csv
 
 GAME_NAME = "dancer"
-LEVEL = "1"
+LEVEL = 1
+LINE_NUMBER = 0
+
 
 class APITestCase(unittest.TestCase):
 
@@ -17,6 +19,7 @@ class APITestCase(unittest.TestCase):
         # Set up any necessary configurations or variables
         self.user_name = args.user_name
         self.password = args.password
+        self.command_args = {}
         self.token = None
         self.base_url = "http://localhost:3001/api"
         self.game_name = GAME_NAME
@@ -29,6 +32,7 @@ class APITestCase(unittest.TestCase):
             self.swap_commands_data = next(reader)
             self.delete_commands_data = next(reader)
 
+    # DS-27 : Registration and Login
     def login(self):
         url = f"{self.base_url}/users/login"
         data = {"name": self.user_name, "password": self.password}
@@ -37,14 +41,15 @@ class APITestCase(unittest.TestCase):
         self.assertIsNotNone(response.json()['token'])
         self.token = response.json()['token']
 
-    def get_level_data(self):
-        url = f"{self.base_url}/{self.game_name}/levels/getOne/{self.level}"
+    def get_level_data(self, level_number):
+        url = f"{self.base_url}/{self.game_name}/levels/getOne/{level_number}"
         headers = {
             "Authorization": f"Bearer {self.token}"
         }
         response = requests.get(url, headers=headers)
         return response.json()
 
+    # DS-7 : Save former code/blocks
     def add_commands(self):
         url = f"{self.base_url}/{self.game_name}/levels/{self.level}/postCommand"
         headers = {
@@ -59,12 +64,31 @@ class APITestCase(unittest.TestCase):
             self.assertIsNotNone(block_data["_id"])
             self.assertEqual(block_data["block"]["_id"], data["block_id"])
 
+            if add_data[2]:
+                self.command_args[block_data["_id"]] = add_data[2].split('\\')
+
+    # DS-88: Arguments to the blocks
+    def insert_arguments(self):
+        headers = {
+            "Authorization": f"Bearer {self.token}"
+        }
+        for command_id in self.command_args:
+            for index in range(0, len(self.command_args[command_id])):
+                url = f"{self.base_url}/{self.game_name}/levels/{self.level}/rows/{command_id}/postArgument/{index}"
+                data = {"value": self.command_args[command_id][index], "list_number": LINE_NUMBER}
+                response = requests.post(url, json=data, headers=headers)
+                self.assertEqual(response.status_code, 200)
+
+                command_data = response.json()
+                self.assertEqual(command_data["arguments"][LINE_NUMBER][index], self.command_args[command_id][index])
+
+    # DS-7: Save former code/blocks
     def swap_commands(self):
         url = f"{self.base_url}/{self.game_name}/levels/{self.level}/swapCommand"
         headers = {
             "Authorization": f"Bearer {self.token}"
         }
-        former_solution = self.get_level_data()["solution"]
+        former_solution = self.get_level_data(self.level)["solution"]
         for swap_data in self.swap_commands_data:
             swap_data = swap_data.split('-')
             dest = int(swap_data[1])
@@ -79,6 +103,7 @@ class APITestCase(unittest.TestCase):
             self.assertEqual(new_solution[src]["_id"], former_solution[dest]["_id"])
             former_solution = new_solution
 
+    # DS-8 : Solving a level
     def solve_level(self):
         url = f"{self.base_url}/{self.game_name}/levels/solve/{self.level}"
         headers = {
@@ -89,11 +114,15 @@ class APITestCase(unittest.TestCase):
         level_data = response.json()
         self.assertTrue(level_data["solved"])
 
+        next_level = self.get_level_data(self.level + 1)
+        self.assertFalse(next_level["locked"])
+
+    # DS-7: Save former code/blocks
     def delete_commands(self):
         headers = {
             "Authorization": f"Bearer {self.token}"
         }
-        former_solution = self.get_level_data()["solution"]
+        former_solution = self.get_level_data(self.level)["solution"]
         self.delete_commands_data = [int(element) for element in self.delete_commands_data]
         i = 0
         while i < len(self.delete_commands_data):
@@ -109,6 +138,7 @@ class APITestCase(unittest.TestCase):
             self.delete_commands_data = [element - 1 if element > index else element for element in
                                          self.delete_commands_data]
 
+    # DS-9 : Delete history and solve from scratch
     def restart_level(self):
         url = f"{self.base_url}/{self.game_name}/levels/restart/{self.level}"
         headers = {
@@ -123,6 +153,7 @@ class APITestCase(unittest.TestCase):
     def test_run(self):
         self.login()
         self.add_commands()
+        self.insert_arguments()
         self.swap_commands()
         self.solve_level()
         self.delete_commands()
